@@ -1,6 +1,7 @@
 import re
 import random
 import time
+import sys
 from statistics import mode
 
 from PIL import Image
@@ -282,20 +283,25 @@ class ResNet(nn.Module):
 def ResNet18():
     return ResNet(BasicBlock, [2, 2, 2, 2])
 
+def ResNet34():
+    return ResNet(BasicBlock, [3, 4, 6, 3])
 
 def ResNet50():
     return ResNet(BottleneckBlock, [3, 4, 6, 3])
 
+def ResNet101():
+    return ResNet(BottleneckBlock, [3, 4, 23, 3])
 
 class VQAModel(nn.Module):
     def __init__(self, vocab_size: int, n_answer: int):
         super().__init__()
-        self.resnet = ResNet18()
+        self.resnet = ResNet50()
         self.text_encoder = nn.Linear(vocab_size, 512)
 
         self.fc = nn.Sequential(
             nn.Linear(1024, 512),
             nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
             nn.Linear(512, n_answer)
         )
 
@@ -358,7 +364,7 @@ def eval(model, dataloader, optimizer, criterion, device):
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
 
-def main():
+def main(filepath):
     # deviceの設定
     set_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -366,10 +372,12 @@ def main():
     # dataloader / model
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    train_dataset = VQADataset(df_path="./data/train.json", image_dir="./data/train", transform=transform)
-    test_dataset = VQADataset(df_path="./data/valid.json", image_dir="./data/valid", transform=transform, answer=False)
+    train_dataset = VQADataset(df_path= filepath+"/train.json", image_dir=filepath+"/train", transform=transform)
+    test_dataset = VQADataset(df_path= filepath+"/valid.json", image_dir=filepath+"/valid", transform=transform, answer=False)
     test_dataset.update_dict(train_dataset)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
@@ -378,7 +386,7 @@ def main():
     model = VQAModel(vocab_size=len(train_dataset.question2idx)+1, n_answer=len(train_dataset.answer2idx)).to(device)
 
     # optimizer / criterion
-    num_epoch = 20
+    num_epoch = 50
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
@@ -406,4 +414,5 @@ def main():
     np.save("submission.npy", submission)
 
 if __name__ == "__main__":
-    main()
+    args = sys.argv
+    main(args[1])
